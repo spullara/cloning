@@ -27,27 +27,10 @@ public class Cloner {
 	private final IInstantiationStrategy instantiationStrategy;
 	private final Set<Class<?>> ignored = new HashSet<Class<?>>();
 	private final Set<Class<?>> ignoredInstanceOf = new HashSet<Class<?>>();
-	private final Set<Class<?>> nullInstead = new HashSet<Class<?>>();
 	private final Map<Class<?>, IFastCloner> fastCloners = new HashMap<Class<?>, IFastCloner>();
 	private final ConcurrentMap<Class<?>, List<Field>> fieldsCache = new ConcurrentHashMap<Class<?>, List<Field>>();
 	private final List<ICloningStrategy> cloningStrategies = new ArrayList<ICloningStrategy>();
 
-	public IDumpCloned getDumpCloned() {
-		return dumpCloned;
-	}
-
-	/**
-	 * provide a cloned classes dumper (so i.e. they can be logged or stored in a file
-	 * instead of the default behaviour which is to println(cloned) )
-	 *
-	 * @param dumpCloned an implementation of the interface which can dump the
-	 *                   cloned classes.
-	 */
-	public void setDumpCloned(IDumpCloned dumpCloned) {
-		this.dumpCloned = dumpCloned;
-	}
-
-	private IDumpCloned dumpCloned = null;
 	private boolean cloningEnabled = true;
 	private boolean nullTransient = false;
 	private boolean cloneSynthetics = true;
@@ -100,10 +83,12 @@ public class Cloner {
 		fastCloners.put(LinkedHashMap.class, new FastClonerLinkedHashMap());
 		fastCloners.put(ConcurrentHashMap.class, new FastClonerConcurrentHashMap());
 		fastCloners.put(ConcurrentLinkedQueue.class, new FastClonerConcurrentLinkedQueue());
+		fastCloners.put(TreeSet.class, new FastClonerTreeSet());
 
 		// register private classes
 		FastClonerArrayListSubList subListCloner = new FastClonerArrayListSubList();
 		registerInaccessibleClassToBeFastCloned("java.util.ArrayList$SubList", subListCloner);
+		registerInaccessibleClassToBeFastCloned("java.util.AbstractList$SubList", subListCloner);
 		registerInaccessibleClassToBeFastCloned("java.util.SubList", subListCloner);
 		registerInaccessibleClassToBeFastCloned("java.util.RandomAccessSubList", subListCloner);
 	}
@@ -195,22 +180,6 @@ public class Cloner {
 	}
 
 	/**
-	 * instead of cloning these classes will set the field to null
-	 *
-	 * @param c the classes to nullify during cloning
-	 */
-	public void nullInsteadOfClone(final Class<?>... c) {
-		for (final Class<?> cl : c) {
-			nullInstead.add(cl);
-		}
-	}
-
-	// spring framework friendly version of nullInsteadOfClone
-	public void setExtraNullInsteadOfClone(final Set<Class<?>> set) {
-		nullInstead.addAll(set);
-	}
-
-	/**
 	 * registers an immutable class. Immutable classes are not cloned.
 	 *
 	 * @param c the immutable class
@@ -264,26 +233,6 @@ public class Cloner {
 	public <T> T deepClone(final T o) {
 		if (o == null) return null;
 		if (!cloningEnabled) return o;
-		if (dumpCloned != null) {
-			dumpCloned.startCloning(o.getClass());
-		}
-		try {
-			return cloneInternal(o);
-		} catch (final IllegalAccessException e) {
-			throw new CloningException("error during cloning of " + o, e);
-		}
-	}
-
-	public <T> T deepCloneDontCloneInstances(final T o, final Object... dontCloneThese) {
-		if (o == null) return null;
-		if (!cloningEnabled) return o;
-		if (dumpCloned != null) {
-			dumpCloned.startCloning(o.getClass());
-		}
-		final Map<Object, Object> clones = new IdentityHashMap<Object, Object>(16);
-		for (final Object dc : dontCloneThese) {
-			clones.put(dc, dc);
-		}
 		try {
 			return cloneInternal(o);
 		} catch (final IllegalAccessException e) {
@@ -372,24 +321,16 @@ public class Cloner {
 		final Class<T> clz = (Class<T>) o.getClass();
 		if (skip.get(clz) == null) {
 			// skip cloning ignored classes
-			if (nullInstead.contains(clz)) return null;
 			if (ignored.contains(clz)) return o;
 			for (final Class<?> iClz : ignoredInstanceOf) {
 				if (iClz.isAssignableFrom(clz)) return o;
 			}
 			if (isImmutable(clz)) return o;
-			if (o instanceof IFreezable) {
-				final IFreezable f = (IFreezable) o;
-				if (f.isFrozen()) return o;
-			}
 			final Object fastClone = fastClone(o);
 			if (fastClone != null) {
 				return (T) fastClone;
 			}
 
-			if (dumpCloned != null) {
-				dumpCloned.startCloning(o.getClass());
-			}
 			if (clz.isArray()) {
 				return cloneArray(o);
 			}
@@ -411,9 +352,6 @@ public class Cloner {
 					final boolean shouldClone = (cloneSynthetics || !field.isSynthetic()) && (cloneAnonymousParent || !isAnonymousParent(field));
 					final Object fieldObjectClone = shouldClone ? applyCloningStrategy(o, fieldObject, field) : fieldObject;
 					field.set(newInstance, fieldObjectClone);
-					if (dumpCloned != null && fieldObjectClone != fieldObject) {
-						dumpCloned.cloning(field, o.getClass());
-					}
 				}
 			}
 		}
@@ -518,31 +456,6 @@ public class Cloner {
 			fieldsCache.putIfAbsent(c, l);
 		}
 		return l;
-	}
-
-	public boolean isDumpClonedClasses() {
-		return dumpCloned != null;
-	}
-
-	/**
-	 * will println() all cloned classes. Useful for debugging only. Use
-	 * setDumpCloned() if you want to control where to print the cloned
-	 * classes.
-	 *
-	 * @param dumpClonedClasses true to enable printing all cloned classes
-	 */
-	public void setDumpClonedClasses(final boolean dumpClonedClasses) {
-		if (dumpClonedClasses) {
-			dumpCloned = new IDumpCloned() {
-				public void startCloning(Class<?> clz) {
-					System.out.println("clone>" + clz);
-				}
-
-				public void cloning(Field field, Class<?> clz) {
-					System.out.println("cloned field>" + field + "  -- of class " + clz);
-				}
-			};
-		} else dumpCloned = null;
 	}
 
 	public boolean isCloningEnabled() {
