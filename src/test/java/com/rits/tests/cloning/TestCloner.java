@@ -413,37 +413,6 @@ public class TestCloner extends TestCase {
 		assertEquals(4, cloned.size());
 	}
 
-	public void testCopyPropertiesArrayPrimitive() {
-		final int[] src = new int[]{5, 6, 7};
-		final int[] dest = new int[3];
-		cloner.copyPropertiesOfInheritedClass(src, dest);
-		assertEquals(src[0], dest[0]);
-		assertEquals(src[1], dest[1]);
-		assertEquals(src[2], dest[2]);
-	}
-
-	public void testCopyPropertiesArray() {
-		final Object[] src = new Object[]{new Integer(5), new Float(8.5f), new Double(3.5d)};
-		final Object[] dest = new Object[3];
-		cloner.copyPropertiesOfInheritedClass(src, dest);
-		assertEquals(src[0], dest[0]);
-		assertEquals(src[1], dest[1]);
-		assertEquals(src[2], dest[2]);
-	}
-
-	public void testCopyPropertiesInheritedClasses() {
-		final A a = new A();
-		final B b = new B();
-		b.setName("x");
-		b.setX(-1);
-		b.setY(10);
-		cloner.copyPropertiesOfInheritedClass(a, b);
-
-		assertEquals("kostas", b.getName());
-		assertEquals(5, b.getX());
-		assertEquals(10, b.getY());
-	}
-
 	static class SynthOuter {
 		public Inner getInner() {
 			return new Inner();
