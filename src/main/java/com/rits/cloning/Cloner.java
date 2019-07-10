@@ -307,6 +307,9 @@ public class Cloner {
             if (cloner == null) cloner = new CloneObjectCloner(clz);
             cloners.put(clz, cloner);
         }
+        if (cloner == IGNORE_CLONER) {
+            return o;
+        }
         return cloner.deepClone(o);
     }
 
@@ -337,7 +340,7 @@ public class Cloner {
     private static class IgnoreClassCloner implements IDeepCloner {
         @Override
         public <T> T deepClone(T o) {
-            return o;
+            throw new AssertionError("Don't call this directly");
         }
     }
 
