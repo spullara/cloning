@@ -13,12 +13,12 @@ public abstract class FastClonerCustomCollection<T extends Collection> implement
 {
 	public abstract T getInstance(T o);
 
-    public Object clone(final Object t, final IDeepCloner cloner, final Map<Object, Object> clones) {
+    public Object clone(final Object t, final IDeepCloner cloner) {
 		final T c = getInstance((T) t);
 		final T l = (T) t;
 		for (final Object o : l)
 		{
-            final Object clone = cloner.deepClone(o, clones);
+            final Object clone = cloner.deepClone(o);
             c.add(clone);
 		}
 		return c;

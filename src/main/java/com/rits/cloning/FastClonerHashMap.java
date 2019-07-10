@@ -11,13 +11,13 @@ import java.util.Map;
 public class FastClonerHashMap implements IFastCloner
 {
 	@SuppressWarnings({ "unchecked", "rawtypes" })
-    public Object clone(final Object t, final IDeepCloner cloner, final Map<Object, Object> clones) {
+    public Object clone(final Object t, final IDeepCloner cloner) {
 		final HashMap<Object, Object> m = (HashMap) t;
 		final HashMap result = new HashMap();
 		for (final Map.Entry e : m.entrySet())
 		{
-            final Object key = cloner.deepClone(e.getKey(), clones);
-            final Object value = cloner.deepClone(e.getValue(), clones);
+            final Object key = cloner.deepClone(e.getKey());
+            final Object value = cloner.deepClone(e.getValue());
 
 			result.put(key, value);
 		}

@@ -9,11 +9,11 @@ import java.util.concurrent.ConcurrentLinkedQueue;
  */
 public class FastClonerConcurrentLinkedQueue implements IFastCloner {
 	@SuppressWarnings({"unchecked", "rawtypes"})
-	public Object clone(Object t, IDeepCloner cloner, Map<Object, Object> clones) {
+	public Object clone(Object t, IDeepCloner cloner) {
 		ConcurrentLinkedQueue q = (ConcurrentLinkedQueue) t;
 		ConcurrentLinkedQueue c = new ConcurrentLinkedQueue();
 		for (Object o : q) {
-			final Object cloneInternal = cloner.deepClone(o, clones);
+			final Object cloneInternal = cloner.deepClone(o);
 			c.add(cloneInternal);
 		}
 		return c;

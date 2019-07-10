@@ -11,12 +11,12 @@ import java.util.Map;
 public class FastClonerHashSet implements IFastCloner
 {
 	@SuppressWarnings({ "unchecked", "rawtypes" })
-    public Object clone(final Object t, final IDeepCloner cloner, final Map<Object, Object> clones) {
+    public Object clone(final Object t, final IDeepCloner cloner) {
 		final HashSet al = (HashSet) t;
 		final HashSet l = new HashSet();
 		for (final Object o : al)
 		{
-            final Object cloneInternal = cloner.deepClone(o, clones);
+            final Object cloneInternal = cloner.deepClone(o);
             l.add(cloneInternal);
 		}
 		return l;

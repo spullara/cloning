@@ -11,6 +11,8 @@ import java.net.URL;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.regex.Pattern;
 
 /**
@@ -27,9 +29,8 @@ public class Cloner {
 	private final Set<Class<?>> ignoredInstanceOf = new HashSet<Class<?>>();
 	private final Set<Class<?>> nullInstead = new HashSet<Class<?>>();
 	private final Map<Class<?>, IFastCloner> fastCloners = new HashMap<Class<?>, IFastCloner>();
-	private final Map<Object, Boolean> ignoredInstances = new IdentityHashMap<Object, Boolean>();
-	private final ConcurrentHashMap<Class<?>, List<Field>> fieldsCache = new ConcurrentHashMap<Class<?>, List<Field>>();
-	private final List<ICloningStrategy> cloningStrategies = new LinkedList<ICloningStrategy>();
+	private final ConcurrentMap<Class<?>, List<Field>> fieldsCache = new ConcurrentHashMap<Class<?>, List<Field>>();
+	private final List<ICloningStrategy> cloningStrategies = new ArrayList<ICloningStrategy>();
 
 	public IDumpCloned getDumpCloned() {
 		return dumpCloned;
@@ -118,9 +119,9 @@ public class Cloner {
 	}
 
 	private IDeepCloner deepCloner = new IDeepCloner() {
-		public <T> T deepClone(T o, Map<Object, Object> clones) {
+		public <T> T deepClone(T o) {
 			try {
-				return cloneInternal(o, clones);
+				return cloneInternal(o);
 			} catch (IllegalAccessException e) {
 				// just rethrow unchecked
 				throw new IllegalStateException(e);
@@ -128,36 +129,11 @@ public class Cloner {
 		}
 	};
 
-	protected Object fastClone(final Object o, final Map<Object, Object> clones) {
+	protected Object fastClone(final Object o) {
 		final Class<? extends Object> c = o.getClass();
 		final IFastCloner fastCloner = fastCloners.get(c);
-		if (fastCloner != null) return fastCloner.clone(o, deepCloner, clones);
+		if (fastCloner != null) return fastCloner.clone(o, deepCloner);
 		return null;
-	}
-
-	public void registerConstant(final Object o) {
-		ignoredInstances.put(o, true);
-	}
-
-	public void registerConstant(final Class<?> c, final String privateFieldName) {
-		try {
-			List<Field> fields = allFields(c);
-			for (Field field : fields) {
-				if (field.getName().equals(privateFieldName)) {
-					field.setAccessible(true);
-					final Object v = field.get(null);
-					ignoredInstances.put(v, true);
-					return;
-				}
-			}
-			throw new RuntimeException("No such field : " + privateFieldName);
-		} catch (final SecurityException e) {
-			throw new RuntimeException(e);
-		} catch (final IllegalArgumentException e) {
-			throw new RuntimeException(e);
-		} catch (final IllegalAccessException e) {
-			throw new RuntimeException(e);
-		}
 	}
 
 	/**
@@ -187,42 +163,12 @@ public class Cloner {
 
 	protected void registerKnownConstants() {
 		// registering known constants of the jdk. 
-		registerStaticFields(TreeSet.class, HashSet.class, HashMap.class, TreeMap.class);
+		// registerStaticFields(TreeSet.class, HashSet.class, HashMap.class, TreeMap.class);
 	}
 
 	public void registerCloningStrategy(ICloningStrategy strategy) {
 		if (strategy == null) throw new NullPointerException("strategy can't be null");
 		cloningStrategies.add(strategy);
-	}
-
-	/**
-	 * registers all static fields of these classes. Those static fields won't be cloned when an instance
-	 * of the class is cloned.
-	 *
-	 * This is useful i.e. when a static field object is added into maps or sets. At that point, there is no
-	 * way for the cloner to know that it was static except if it is registered.
-	 *
-	 * @param classes array of classes
-	 */
-	public void registerStaticFields(final Class<?>... classes) {
-		for (final Class<?> c : classes) {
-			final List<Field> fields = allFields(c);
-			for (final Field field : fields) {
-				final int mods = field.getModifiers();
-				if (Modifier.isStatic(mods) && !field.getType().isPrimitive()) {
-					registerConstant(c, field.getName());
-				}
-			}
-		}
-	}
-
-	/**
-	 * spring framework friendly version of registerStaticFields
-	 *
-	 * @param set a set of classes which will be scanned for static fields
-	 */
-	public void setExtraStaticFields(final Set<Class<?>> set) {
-		registerStaticFields((Class<?>[]) set.toArray());
 	}
 
 	/**
@@ -302,7 +248,7 @@ public class Cloner {
 
 	@SuppressWarnings("unchecked")
 	public <T> T fastCloneOrNewInstance(final Class<T> c) {
-		final T fastClone = (T) fastClone(c, null);
+		final T fastClone = (T) fastClone(c);
 		if (fastClone != null) return fastClone;
 		return newInstance(c);
 
@@ -321,9 +267,8 @@ public class Cloner {
 		if (dumpCloned != null) {
 			dumpCloned.startCloning(o.getClass());
 		}
-		final Map<Object, Object> clones = new IdentityHashMap<Object, Object>(16);
 		try {
-			return cloneInternal(o, clones);
+			return cloneInternal(o);
 		} catch (final IllegalAccessException e) {
 			throw new CloningException("error during cloning of " + o, e);
 		}
@@ -340,7 +285,7 @@ public class Cloner {
 			clones.put(dc, dc);
 		}
 		try {
-			return cloneInternal(o, clones);
+			return cloneInternal(o);
 		} catch (final IllegalAccessException e) {
 			throw new CloningException("error during cloning of " + o, e);
 		}
@@ -358,7 +303,7 @@ public class Cloner {
 		if (o == null) return null;
 		if (!cloningEnabled) return o;
 		try {
-			return cloneInternal(o, null);
+			return cloneInternal(o);
 		} catch (final IllegalAccessException e) {
 			throw new CloningException("error during cloning of " + o, e);
 		}
@@ -417,51 +362,45 @@ public class Cloner {
 		return false;
 	}
 
+	private Map<Class, Boolean> skip = new ConcurrentHashMap<>();
+
 	@SuppressWarnings("unchecked")
-	protected <T> T cloneInternal(final T o, final Map<Object, Object> clones) throws IllegalAccessException {
+	protected <T> T cloneInternal(final T o) throws IllegalAccessException {
 		if (o == null) return null;
 		if (o == this) return null; // don't clone the cloner!
-		if (ignoredInstances.containsKey(o)) return o;
 		if (o instanceof Enum) return o;
 		final Class<T> clz = (Class<T>) o.getClass();
-		// skip cloning ignored classes
-		if (nullInstead.contains(clz)) return null;
-		if (ignored.contains(clz)) return o;
-		for (final Class<?> iClz : ignoredInstanceOf) {
-			if (iClz.isAssignableFrom(clz)) return o;
-		}
-		if (isImmutable(clz)) return o;
-		if (o instanceof IFreezable) {
-			final IFreezable f = (IFreezable) o;
-			if (f.isFrozen()) return o;
-		}
-		final Object clonedPreviously = clones != null ? clones.get(o) : null;
-		if (clonedPreviously != null) return (T) clonedPreviously;
-
-		final Object fastClone = fastClone(o, clones);
-		if (fastClone != null) {
-			if (clones != null) {
-				clones.put(o, fastClone);
+		if (skip.get(clz) == null) {
+			// skip cloning ignored classes
+			if (nullInstead.contains(clz)) return null;
+			if (ignored.contains(clz)) return o;
+			for (final Class<?> iClz : ignoredInstanceOf) {
+				if (iClz.isAssignableFrom(clz)) return o;
 			}
-			return (T) fastClone;
-		}
+			if (isImmutable(clz)) return o;
+			if (o instanceof IFreezable) {
+				final IFreezable f = (IFreezable) o;
+				if (f.isFrozen()) return o;
+			}
+			final Object fastClone = fastClone(o);
+			if (fastClone != null) {
+				return (T) fastClone;
+			}
 
-		if (dumpCloned != null) {
-			dumpCloned.startCloning(o.getClass());
+			if (dumpCloned != null) {
+				dumpCloned.startCloning(o.getClass());
+			}
+			if (clz.isArray()) {
+				return cloneArray(o);
+			}
+			skip.put(clz, true);
 		}
-		if (clz.isArray()) {
-			return cloneArray(o, clones);
-		}
-
-		return cloneObject(o, clones, clz);
+		return cloneObject(o, clz);
 	}
 
 	// clones o, no questions asked!
-	private <T> T cloneObject(T o, Map<Object, Object> clones, Class<T> clz) throws IllegalAccessException {
+	private <T> T cloneObject(T o, Class<T> clz) throws IllegalAccessException {
 		final T newInstance = newInstance(clz);
-		if (clones != null) {
-			clones.put(o, newInstance);
-		}
 		final List<Field> fields = allFields(clz);
 		for (final Field field : fields) {
 			final int modifiers = field.getModifiers();
@@ -470,7 +409,7 @@ public class Cloner {
 					// request by Jonathan : transient fields can be null-ed
 					final Object fieldObject = field.get(o);
 					final boolean shouldClone = (cloneSynthetics || !field.isSynthetic()) && (cloneAnonymousParent || !isAnonymousParent(field));
-					final Object fieldObjectClone = clones != null ? (shouldClone ? applyCloningStrategy(clones, o, fieldObject, field) : fieldObject) : fieldObject;
+					final Object fieldObjectClone = shouldClone ? applyCloningStrategy(o, fieldObject, field) : fieldObject;
 					field.set(newInstance, fieldObjectClone);
 					if (dumpCloned != null && fieldObjectClone != fieldObject) {
 						dumpCloned.cloning(field, o.getClass());
@@ -481,29 +420,26 @@ public class Cloner {
 		return newInstance;
 	}
 
-	private Object applyCloningStrategy(Map<Object, Object> clones, Object o, Object fieldObject, Field field) throws IllegalAccessException {
+	private Object applyCloningStrategy(Object o, Object fieldObject, Field field) throws IllegalAccessException {
 		for (ICloningStrategy strategy : cloningStrategies) {
 			ICloningStrategy.Strategy s = strategy.strategyFor(o, field);
 			if (s == ICloningStrategy.Strategy.NULL_INSTEAD_OF_CLONE) return null;
 			if (s == ICloningStrategy.Strategy.SAME_INSTANCE_INSTEAD_OF_CLONE) return fieldObject;
 		}
-		return cloneInternal(fieldObject, clones);
+		return cloneInternal(fieldObject);
 	}
 
 	@SuppressWarnings("unchecked")
-	private <T> T cloneArray(T o, Map<Object, Object> clones) throws IllegalAccessException {
+	private <T> T cloneArray(T o) throws IllegalAccessException {
 		final Class<T> clz = (Class<T>) o.getClass();
 		final int length = Array.getLength(o);
 		final T newInstance = (T) Array.newInstance(clz.getComponentType(), length);
-		if (clones != null) {
-			clones.put(o, newInstance);
-		}
 		if (clz.getComponentType().isPrimitive() || isImmutable(clz.getComponentType())) {
 			System.arraycopy(o, 0, newInstance, 0, length);
 		} else {
 			for (int i = 0; i < length; i++) {
 				final Object v = Array.get(o, i);
-				final Object clone = clones != null ? cloneInternal(v, clones) : v;
+				final Object clone = cloneInternal(v);
 				Array.set(newInstance, i, clone);
 			}
 		}
@@ -572,7 +508,7 @@ public class Cloner {
 	protected List<Field> allFields(final Class<?> c) {
 		List<Field> l = fieldsCache.get(c);
 		if (l == null) {
-			l = new LinkedList<Field>();
+			l = new ArrayList<Field>();
 			final Field[] fields = c.getDeclaredFields();
 			addAll(l, fields);
 			Class<?> sc = c;
