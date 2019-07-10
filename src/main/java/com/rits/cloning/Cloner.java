@@ -23,6 +23,7 @@ import java.util.regex.Pattern;
  * 18 Sep 2008
  */
 public class Cloner {
+    public static final IgnoreClassCloner IGNORE_CLONER = new IgnoreClassCloner();
     private final IInstantiationStrategy instantiationStrategy;
     private final Set<Class<?>> ignored = new HashSet<Class<?>>();
     private final Set<Class<?>> ignoredInstanceOf = new HashSet<Class<?>>();
@@ -96,13 +97,6 @@ public class Cloner {
             }
         }
     };
-
-    protected Object fastClone(final Object o) {
-        final Class<? extends Object> c = o.getClass();
-        final IFastCloner fastCloner = fastCloners.get(c);
-        if (fastCloner != null) return fastCloner.clone(o, deepCloner);
-        return null;
-    }
 
     /**
      * registers some known JDK immutable classes. Override this to register your
@@ -193,14 +187,6 @@ public class Cloner {
         return instantiationStrategy.newInstance(c);
     }
 
-    @SuppressWarnings("unchecked")
-    public <T> T fastCloneOrNewInstance(final Class<T> c) {
-        final T fastClone = (T) fastClone(c);
-        if (fastClone != null) return fastClone;
-        return newInstance(c);
-
-    }
-
     /**
      * deep clones "o".
      *
@@ -289,31 +275,87 @@ public class Cloner {
     }
 
     private Map<Class, Boolean> skip = new ConcurrentHashMap<>();
+    private Map<Class, IDeepCloner> cloners = new ConcurrentHashMap<>();
 
     @SuppressWarnings("unchecked")
     protected <T> T cloneInternal(final T o) throws IllegalAccessException {
         if (o == null) return null;
         if (o == this) return null; // don't clone the cloner!
-        if (o instanceof Enum) return o;
         final Class<T> clz = (Class<T>) o.getClass();
-        if (skip.get(clz) == null) {
-            // skip cloning ignored classes
-            if (ignored.contains(clz)) return o;
-            for (final Class<?> iClz : ignoredInstanceOf) {
-                if (iClz.isAssignableFrom(clz)) return o;
+        IDeepCloner cloner = cloners.get(clz);
+        if (cloner == null) {
+            if (o instanceof Enum) {
+                cloner = IGNORE_CLONER;
+            } else if (ignored.contains(clz)) {
+                cloner = IGNORE_CLONER;
+            } else if (isImmutable(clz)) {
+                cloner = IGNORE_CLONER;
+            } else if (clz.isArray()) {
+                cloner = new CloneArrayCloner();
+            } else {
+                final IFastCloner fastCloner = fastCloners.get(clz);
+                if (fastCloner != null) {
+                    cloner = new FastClonerCloner(fastCloner);
+                } else {
+                    for (final Class<?> iClz : ignoredInstanceOf) {
+                        if (iClz.isAssignableFrom(clz)) {
+                            cloner = IGNORE_CLONER;
+                        }
+                    }
+                }
             }
-            if (isImmutable(clz)) return o;
-            final Object fastClone = fastClone(o);
-            if (fastClone != null) {
-                return (T) fastClone;
-            }
-
-            if (clz.isArray()) {
-                return cloneArray(o);
-            }
-            skip.put(clz, true);
+            if (cloner == null) cloner = new CloneObjectCloner(clz);
+            cloners.put(clz, cloner);
         }
-        return cloneObject(o, clz);
+        return cloner.deepClone(o);
+    }
+
+    private class CloneArrayCloner implements IDeepCloner {
+        @Override
+        public <T> T deepClone(T o) {
+            try {
+                return cloneArray(o);
+            } catch (IllegalAccessException e) {
+                throw new AssertionError(e);
+            }
+        }
+    }
+
+    private class FastClonerCloner implements IDeepCloner {
+        private IFastCloner fastCloner;
+
+        FastClonerCloner(IFastCloner fastCloner) {
+            this.fastCloner = fastCloner;
+        }
+
+        @Override
+        public <T> T deepClone(T o) {
+            return (T) fastCloner.clone(o, deepCloner);
+        }
+    }
+
+    private static class IgnoreClassCloner implements IDeepCloner {
+        @Override
+        public <T> T deepClone(T o) {
+            return o;
+        }
+    }
+
+    private class CloneObjectCloner implements IDeepCloner {
+        private final Class<?> clz;
+
+        CloneObjectCloner(Class<?> clz) {
+            this.clz = clz;
+        }
+
+        @Override
+        public <T> T deepClone(T o) {
+            try {
+                return cloneObject(o, (Class<T>) clz);
+            } catch (IllegalAccessException e) {
+                throw new AssertionError(e);
+            }
+        }
     }
 
     private enum FieldCloneType {
@@ -327,13 +369,10 @@ public class Cloner {
         final Field[] fields = allFields(clz);
         for (int i = 0; i < fields.length; i++) {
             Field field = fields[i];
-            final int modifiers = field.getModifiers();
-            if (!Modifier.isStatic(modifiers) && !Modifier.isTransient(modifiers)) {
-                final Object fieldObject = field.get(o);
-                final boolean shouldClone = !field.isSynthetic() && !isAnonymousParent(field);
-                final Object fieldObjectClone = shouldClone ? cloneInternal(fieldObject) : fieldObject;
-                field.set(newInstance, fieldObjectClone);
-            }
+            final Object fieldObject = field.get(o);
+            final boolean shouldClone = !field.isSynthetic() && !isAnonymousParent(field);
+            final Object fieldObjectClone = shouldClone ? cloneInternal(fieldObject) : fieldObject;
+            field.set(newInstance, fieldObjectClone);
         }
         return newInstance;
     }
@@ -369,10 +408,13 @@ public class Cloner {
      */
     private void addAll(final List<Field> l, final Field[] fields) {
         for (final Field field : fields) {
-            if (!field.isAccessible()) {
-                field.setAccessible(true);
+            final int modifiers = field.getModifiers();
+            if (!Modifier.isStatic(modifiers) && !Modifier.isTransient(modifiers)) {
+                if (!field.isAccessible()) {
+                    field.setAccessible(true);
+                }
+                l.add(field);
             }
-            l.add(field);
         }
     }
 
@@ -382,7 +424,7 @@ public class Cloner {
     protected Field[] allFields(final Class<?> c) {
         Field[] l = fieldsCache.get(c);
         if (l == null) {
-            List<Field> list = new ArrayList<Field>();
+            List<Field> list = new ArrayList<>();
             final Field[] fields = c.getDeclaredFields();
             addAll(list, fields);
             Class<?> sc = c;
