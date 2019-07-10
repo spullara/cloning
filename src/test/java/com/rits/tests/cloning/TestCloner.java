@@ -413,27 +413,6 @@ public class TestCloner extends TestCase {
 		assertEquals(4, cloned.size());
 	}
 
-	public void testTransientNullPositive() {
-		final Cloner c = new Cloner();
-		c.setNullTransient(true);
-		final TransientTest tt = new TransientTest();
-		final TransientTest deepClone = c.deepClone(tt);
-		assertNull(deepClone.tr1);
-		assertNull(deepClone.a);
-		assertEquals(0, deepClone.i);
-		assertNotNull(deepClone.nontr);
-	}
-
-	public void testTransientNullNegative() {
-		final Cloner c = new Cloner();
-		c.setNullTransient(false);
-		final TransientTest tt = new TransientTest();
-		final TransientTest deepClone = c.deepClone(tt);
-		assertNotNull(deepClone.tr1);
-		assertNotNull(deepClone.a);
-		assertNotNull(deepClone.nontr);
-	}
-
 	public void testCopyPropertiesArrayPrimitive() {
 		final int[] src = new int[]{5, 6, 7};
 		final int[] dest = new int[3];
@@ -477,17 +456,6 @@ public class TestCloner extends TestCase {
 				return SynthOuter.this;
 			}
 		}
-	}
-
-	public void testDontCloneSynthetic() {
-		final Cloner cloner = new Cloner();
-		cloner.setCloneSynthetics(false);
-		final SynthOuter outer = new SynthOuter();
-		final Inner inner = outer.getInner();
-		final Inner clonedInner = cloner.deepClone(inner);
-		assertNotSame(inner, clonedInner);
-		assertNotSame(inner.x, clonedInner.x);
-		assertSame(outer, clonedInner.getOuter());
 	}
 
 	public void testTreeMapWithComparator() {
@@ -541,16 +509,6 @@ public class TestCloner extends TestCase {
 		final TestEnum original = TestEnum.A;
 		final TestEnum clone = cloner.deepClone(original);
 		assertSame(clone, original);
-	}
-
-	public void testDate() {
-		Date original = new Date();
-		Cloner cloner = new Cloner();
-		cloner.setNullTransient(true);
-		Date clone = cloner.deepClone(original);
-
-		// I expect this to be true, but is is false.
-		assertEquals(0, clone.getTime());
 	}
 
 	public void testUnregisterFastCloner() {

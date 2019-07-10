@@ -119,7 +119,18 @@
 			<groupId>org.objenesis</groupId>
 			<artifactId>objenesis</artifactId>
 			<version>3.0.1</version>
+		</dependency>    <!-- ASM -->
+		<dependency>
+			<groupId>org.ow2.asm</groupId>
+			<artifactId>asm-commons</artifactId>
+			<version>7.1</version>
 		</dependency>
+		<dependency>
+			<groupId>org.ow2.asm</groupId>
+			<artifactId>asm-util</artifactId>
+			<version>7.1</version>
+		</dependency>
+
 	</dependencies>
 	<profiles>
 		<profile>

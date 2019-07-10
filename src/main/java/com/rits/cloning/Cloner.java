@@ -12,7 +12,6 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.regex.Pattern;
 
 /**
@@ -29,11 +28,10 @@ public class Cloner {
 	private final Set<Class<?>> ignoredInstanceOf = new HashSet<Class<?>>();
 	private final Map<Class<?>, IFastCloner> fastCloners = new HashMap<Class<?>, IFastCloner>();
 	private final ConcurrentMap<Class<?>, List<Field>> fieldsCache = new ConcurrentHashMap<Class<?>, List<Field>>();
-	private final List<ICloningStrategy> cloningStrategies = new ArrayList<ICloningStrategy>();
 
-	private boolean cloningEnabled = true;
-	private boolean nullTransient = false;
-	private boolean cloneSynthetics = true;
+	private final boolean cloningEnabled = true;
+	private final boolean nullTransient = false;
+	private final boolean cloneSynthetics = true;
 
 	public Cloner() {
 		this.instantiationStrategy = ObjenesisInstantiationStrategy.getInstance();
@@ -47,21 +45,6 @@ public class Cloner {
 
 	public boolean isNullTransient() {
 		return nullTransient;
-	}
-
-	/**
-	 * this makes the cloner to set a transient field to null upon cloning.
-	 *
-	 * NOTE: primitive types can't be nulled. Their value will be set to default, i.e. 0 for int
-	 *
-	 * @param nullTransient true for transient fields to be nulled
-	 */
-	public void setNullTransient(final boolean nullTransient) {
-		this.nullTransient = nullTransient;
-	}
-
-	public void setCloneSynthetics(final boolean cloneSynthetics) {
-		this.cloneSynthetics = cloneSynthetics;
 	}
 
 	private void init() {
@@ -149,11 +132,6 @@ public class Cloner {
 	protected void registerKnownConstants() {
 		// registering known constants of the jdk. 
 		// registerStaticFields(TreeSet.class, HashSet.class, HashMap.class, TreeMap.class);
-	}
-
-	public void registerCloningStrategy(ICloningStrategy strategy) {
-		if (strategy == null) throw new NullPointerException("strategy can't be null");
-		cloningStrategies.add(strategy);
 	}
 
 	/**
@@ -260,7 +238,6 @@ public class Cloner {
 
 	// caches immutables for quick reference
 	private final ConcurrentHashMap<Class<?>, Boolean> immutables = new ConcurrentHashMap<Class<?>, Boolean>();
-	private boolean cloneAnonymousParent = true;
 
 	/**
 	 * override this to decide if a class is immutable. Immutable classes are not cloned.
@@ -349,8 +326,8 @@ public class Cloner {
 				if (!(nullTransient && Modifier.isTransient(modifiers))) {
 					// request by Jonathan : transient fields can be null-ed
 					final Object fieldObject = field.get(o);
-					final boolean shouldClone = (cloneSynthetics || !field.isSynthetic()) && (cloneAnonymousParent || !isAnonymousParent(field));
-					final Object fieldObjectClone = shouldClone ? applyCloningStrategy(o, fieldObject, field) : fieldObject;
+					final boolean shouldClone = !field.isSynthetic() && !isAnonymousParent(field);
+					final Object fieldObjectClone = shouldClone ? cloneInternal(fieldObject) : fieldObject;
 					field.set(newInstance, fieldObjectClone);
 				}
 			}
@@ -358,13 +335,8 @@ public class Cloner {
 		return newInstance;
 	}
 
-	private Object applyCloningStrategy(Object o, Object fieldObject, Field field) throws IllegalAccessException {
-		for (ICloningStrategy strategy : cloningStrategies) {
-			ICloningStrategy.Strategy s = strategy.strategyFor(o, field);
-			if (s == ICloningStrategy.Strategy.NULL_INSTEAD_OF_CLONE) return null;
-			if (s == ICloningStrategy.Strategy.SAME_INSTANCE_INSTEAD_OF_CLONE) return fieldObject;
-		}
-		return cloneInternal(fieldObject);
+	private <T> IDeepCloner cloneCompiler(Class<T> clz) {
+		return null;
 	}
 
 	@SuppressWarnings("unchecked")
@@ -460,21 +432,6 @@ public class Cloner {
 
 	public boolean isCloningEnabled() {
 		return cloningEnabled;
-	}
-
-	public void setCloningEnabled(final boolean cloningEnabled) {
-		this.cloningEnabled = cloningEnabled;
-	}
-
-	/**
-	 * if false, anonymous classes parent class won't be cloned. Default is true
-	 */
-	public void setCloneAnonymousParent(final boolean cloneAnonymousParent) {
-		this.cloneAnonymousParent = cloneAnonymousParent;
-	}
-
-	public boolean isCloneAnonymousParent() {
-		return cloneAnonymousParent;
 	}
 
 	/**
