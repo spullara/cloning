@@ -1,5 +1,7 @@
 package com.rits.cloning;
 
+import sun.misc.Unsafe;
+
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Array;
 import java.lang.reflect.Field;
@@ -22,7 +24,6 @@ import java.util.regex.Pattern;
  *         18 Sep 2008
  */
 public class Cloner {
-	private final IInstantiationStrategy instantiationStrategy;
 	private final Set<Class<?>> ignored = new HashSet<Class<?>>();
 	private final Set<Class<?>> ignoredInstanceOf = new HashSet<Class<?>>();
 	private final Set<Class<?>> nullInstead = new HashSet<Class<?>>();
@@ -47,22 +48,9 @@ public class Cloner {
 	}
 
 	private IDumpCloned dumpCloned = null;
-	private boolean cloningEnabled = true;
-	private boolean nullTransient = false;
-	private boolean cloneSynthetics = true;
 
-	public Cloner() {
-		this.instantiationStrategy = ObjenesisInstantiationStrategy.getInstance();
+    public Cloner() {
 		init();
-	}
-
-	public Cloner(final IInstantiationStrategy instantiationStrategy) {
-		this.instantiationStrategy = instantiationStrategy;
-		init();
-	}
-
-	public boolean isNullTransient() {
-		return nullTransient;
 	}
 
 	/**
@@ -73,16 +61,13 @@ public class Cloner {
 	 * @param nullTransient true for transient fields to be nulled
 	 */
 	public void setNullTransient(final boolean nullTransient) {
-		this.nullTransient = nullTransient;
-	}
+    }
 
 	public void setCloneSynthetics(final boolean cloneSynthetics) {
-		this.cloneSynthetics = cloneSynthetics;
-	}
+    }
 
 	private void init() {
 		registerKnownJdkImmutableClasses();
-		registerKnownConstants();
 		registerFastCloners();
 	}
 
@@ -135,31 +120,6 @@ public class Cloner {
 		return null;
 	}
 
-	public void registerConstant(final Object o) {
-		ignoredInstances.put(o, true);
-	}
-
-	public void registerConstant(final Class<?> c, final String privateFieldName) {
-		try {
-			List<Field> fields = allFields(c);
-			for (Field field : fields) {
-				if (field.getName().equals(privateFieldName)) {
-					field.setAccessible(true);
-					final Object v = field.get(null);
-					ignoredInstances.put(v, true);
-					return;
-				}
-			}
-			throw new RuntimeException("No such field : " + privateFieldName);
-		} catch (final SecurityException e) {
-			throw new RuntimeException(e);
-		} catch (final IllegalArgumentException e) {
-			throw new RuntimeException(e);
-		} catch (final IllegalAccessException e) {
-			throw new RuntimeException(e);
-		}
-	}
-
 	/**
 	 * registers some known JDK immutable classes. Override this to register your
 	 * own list of jdk's immutable classes
@@ -185,44 +145,9 @@ public class Cloner {
 		registerImmutable(Pattern.class);
 	}
 
-	protected void registerKnownConstants() {
-		// registering known constants of the jdk. 
-		registerStaticFields(TreeSet.class, HashSet.class, HashMap.class, TreeMap.class);
-	}
-
 	public void registerCloningStrategy(ICloningStrategy strategy) {
 		if (strategy == null) throw new NullPointerException("strategy can't be null");
 		cloningStrategies.add(strategy);
-	}
-
-	/**
-	 * registers all static fields of these classes. Those static fields won't be cloned when an instance
-	 * of the class is cloned.
-	 *
-	 * This is useful i.e. when a static field object is added into maps or sets. At that point, there is no
-	 * way for the cloner to know that it was static except if it is registered.
-	 *
-	 * @param classes array of classes
-	 */
-	public void registerStaticFields(final Class<?>... classes) {
-		for (final Class<?> c : classes) {
-			final List<Field> fields = allFields(c);
-			for (final Field field : fields) {
-				final int mods = field.getModifiers();
-				if (Modifier.isStatic(mods) && !field.getType().isPrimitive()) {
-					registerConstant(c, field.getName());
-				}
-			}
-		}
-	}
-
-	/**
-	 * spring framework friendly version of registerStaticFields
-	 *
-	 * @param set a set of classes which will be scanned for static fields
-	 */
-	public void setExtraStaticFields(final Set<Class<?>> set) {
-		registerStaticFields((Class<?>[]) set.toArray());
 	}
 
 	/**
@@ -289,6 +214,8 @@ public class Cloner {
 		fastCloners.remove(c);
 	}
 
+	private static Unsafe unsafe = Unsafe.getUnsafe();
+
 	/**
 	 * creates a new instance of c. Override to provide your own implementation
 	 *
@@ -297,15 +224,11 @@ public class Cloner {
 	 * @return a new instance of c
 	 */
 	protected <T> T newInstance(final Class<T> c) {
-		return instantiationStrategy.newInstance(c);
-	}
-
-	@SuppressWarnings("unchecked")
-	public <T> T fastCloneOrNewInstance(final Class<T> c) {
-		final T fastClone = (T) fastClone(c, null);
-		if (fastClone != null) return fastClone;
-		return newInstance(c);
-
+		try {
+			return c.cast(unsafe.allocateInstance(c));
+		} catch (InstantiationException e) {
+			throw new AssertionError("Failed to instantiate: " + c, e);
+		}
 	}
 
 	/**
@@ -317,7 +240,7 @@ public class Cloner {
 	 */
 	public <T> T deepClone(final T o) {
 		if (o == null) return null;
-		if (!cloningEnabled) return o;
+		if (!true) return o;
 		if (dumpCloned != null) {
 			dumpCloned.startCloning(o.getClass());
 		}
@@ -331,7 +254,7 @@ public class Cloner {
 
 	public <T> T deepCloneDontCloneInstances(final T o, final Object... dontCloneThese) {
 		if (o == null) return null;
-		if (!cloningEnabled) return o;
+		if (!true) return o;
 		if (dumpCloned != null) {
 			dumpCloned.startCloning(o.getClass());
 		}
@@ -356,7 +279,7 @@ public class Cloner {
 	 */
 	public <T> T shallowClone(final T o) {
 		if (o == null) return null;
-		if (!cloningEnabled) return o;
+		if (!true) return o;
 		try {
 			return cloneInternal(o, null);
 		} catch (final IllegalAccessException e) {
@@ -466,10 +389,10 @@ public class Cloner {
 		for (final Field field : fields) {
 			final int modifiers = field.getModifiers();
 			if (!Modifier.isStatic(modifiers)) {
-				if (!(nullTransient && Modifier.isTransient(modifiers))) {
+				if (!(false && Modifier.isTransient(modifiers))) {
 					// request by Jonathan : transient fields can be null-ed
 					final Object fieldObject = field.get(o);
-					final boolean shouldClone = (cloneSynthetics || !field.isSynthetic()) && (cloneAnonymousParent || !isAnonymousParent(field));
+					final boolean shouldClone = (true || !field.isSynthetic()) && (cloneAnonymousParent || !isAnonymousParent(field));
 					final Object fieldObjectClone = clones != null ? (shouldClone ? applyCloningStrategy(clones, o, fieldObject, field) : fieldObject) : fieldObject;
 					field.set(newInstance, fieldObjectClone);
 					if (dumpCloned != null && fieldObjectClone != fieldObject) {
@@ -610,12 +533,11 @@ public class Cloner {
 	}
 
 	public boolean isCloningEnabled() {
-		return cloningEnabled;
+		return true;
 	}
 
 	public void setCloningEnabled(final boolean cloningEnabled) {
-		this.cloningEnabled = cloningEnabled;
-	}
+    }
 
 	/**
 	 * if false, anonymous classes parent class won't be cloned. Default is true
