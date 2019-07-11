@@ -1,13 +1,9 @@
 package com.rits.cloning;
 
-import sun.misc.Unsafe;
 import sun.reflect.ReflectionFactory;
 
 import java.lang.annotation.Annotation;
-import java.lang.reflect.Array;
-import java.lang.reflect.Constructor;
-import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
+import java.lang.reflect.*;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.net.URI;
@@ -29,7 +25,6 @@ public class Cloner {
 	private final Set<Class<?>> ignored = new HashSet<>();
 	private final Set<Class<?>> ignoredInstanceOf = new HashSet<>();
 	private final Map<Class<?>, IFastCloner> fastCloners = new HashMap<>();
-	private final ConcurrentHashMap<Class<?>, List<Field>> fieldsCache = new ConcurrentHashMap<>();
 	private final List<ICloningStrategy> cloningStrategies = new LinkedList<>();
 
     public Cloner() {
@@ -79,13 +74,6 @@ public class Cloner {
 			return cloneInternal(o, clones);
 		}
 	};
-
-	protected Object fastClone(final Object o, final Map<Object, Object> clones) {
-		final Class<? extends Object> c = o.getClass();
-		final IFastCloner fastCloner = fastCloners.get(c);
-		if (fastCloner != null) return fastCloner.clone(o, deepCloner, clones);
-		return null;
-	}
 
 	/**
 	 * registers some known JDK immutable classes. Override this to register your
@@ -166,28 +154,13 @@ public class Cloner {
 	}
 
 	private static ReflectionFactory reflectionFactory = ReflectionFactory.getReflectionFactory();
-	private static Constructor objectConstrutor;
+	private static Constructor objectConstructor;
 
 	static {
 		try {
-			objectConstrutor = Object.class.getConstructor((Class[]) null);
+			objectConstructor = Object.class.getConstructor((Class[]) null);
 		} catch (NoSuchMethodException e) {
 			throw new AssertionError(e);
-		}
-	}
-
-	/**
-	 * creates a new instance of c. Override to provide your own implementation
-	 *
-	 * @param <T> the type of c
-	 * @param c   the class
-	 * @return a new instance of c
-	 */
-	protected <T> T newInstance(final Class<T> c) {
-		try {
-			return c.cast(reflectionFactory.newConstructorForSerialization(c, objectConstrutor).newInstance(null));
-		} catch (Exception e) {
-			throw new AssertionError("Failed to instantiate: " + c, e);
 		}
 	}
 
@@ -356,42 +329,52 @@ public class Cloner {
 		}
 	}
 
+	private static final Field[] EMPTY_FIELD_ARRAY = new Field[0];
+
 	private class CloneObjectCloner implements IDeepCloner {
-		private final Class<?> clz;
+
+		private final Constructor constructor;
+		private final Field[] fields;
+		private final int numFields;
 
 		CloneObjectCloner(Class<?> clz) {
-			this.clz = clz;
+			constructor = reflectionFactory.newConstructorForSerialization(clz, objectConstructor);
+			List<Field> l = new LinkedList<>();
+			Class<?> sc = clz;
+			do {
+				final Field[] fs = sc.getDeclaredFields();
+				for (final Field f : fs) {
+					if (!f.isAccessible()) {
+						f.setAccessible(true);
+					}
+					final int modifiers = f.getModifiers();
+					if (!Modifier.isStatic(modifiers)) {
+						l.add(f);
+					}
+				}
+			} while ((sc = sc.getSuperclass()) != Object.class && sc != null);
+			fields = l.toArray(EMPTY_FIELD_ARRAY);
+			numFields = fields.length;
 		}
 
 		@Override
 		public <T> T deepClone(T o, Map<Object, Object> clones) {
 			try {
-				return cloneObject(o, clones, (Class<T>) clz);
-			} catch (IllegalAccessException e) {
+				T newInstance = (T) constructor.newInstance();
+				if (clones != null) {
+					clones.put(o, newInstance);
+				}
+				for (int i = 0; i < numFields; i++) {
+					Field field = fields[i];
+					final Object fieldObject = field.get(o);
+					final Object fieldObjectClone = clones != null ? applyCloningStrategy(clones, o, fieldObject, field) : fieldObject;
+					field.set(newInstance, fieldObjectClone);
+				}
+				return newInstance;
+			} catch (IllegalAccessException | InvocationTargetException | InstantiationException e) {
 				throw new AssertionError(e);
 			}
 		}
-	}
-	// clones o, no questions asked!
-	private <T> T cloneObject(T o, Map<Object, Object> clones, Class<T> clz) throws IllegalAccessException {
-		final T newInstance = newInstance(clz);
-		if (clones != null) {
-			clones.put(o, newInstance);
-		}
-		final List<Field> fields = allFields(clz);
-		for (final Field field : fields) {
-			final int modifiers = field.getModifiers();
-			if (!Modifier.isStatic(modifiers)) {
-				// request by Jonathan : transient fields can be null-ed
-				final Object fieldObject = field.get(o);
-				if ((true || !field.isSynthetic())) {
-				}
-				final boolean shouldClone = true;
-				final Object fieldObjectClone = clones != null ? applyCloningStrategy(clones, o, fieldObject, field) : fieldObject;
-				field.set(newInstance, fieldObjectClone);
-			}
-		}
-		return newInstance;
 	}
 
 	private Object applyCloningStrategy(Map<Object, Object> clones, Object o, Object fieldObject, Field field) {
@@ -425,76 +408,6 @@ public class Cloner {
 
 	private boolean isAnonymousParent(final Field field) {
 		return "this$0".equals(field.getName());
-	}
-
-	/**
-	 * copies all properties from src to dest. Src and dest can be of different class, provided they contain same field names/types
-	 *
-	 * @param src  the source object
-	 * @param dest the destination object which must contain as minimum all the fields of src
-	 */
-	public <T, E extends T> void copyPropertiesOfInheritedClass(final T src, final E dest) {
-		if (src == null) throw new IllegalArgumentException("src can't be null");
-		if (dest == null) throw new IllegalArgumentException("dest can't be null");
-		final Class<? extends Object> srcClz = src.getClass();
-		final Class<? extends Object> destClz = dest.getClass();
-		if (srcClz.isArray()) {
-			if (!destClz.isArray())
-				throw new IllegalArgumentException("can't copy from array to non-array class " + destClz);
-			final int length = Array.getLength(src);
-			for (int i = 0; i < length; i++) {
-				final Object v = Array.get(src, i);
-				Array.set(dest, i, v);
-			}
-			return;
-		}
-		final List<Field> fields = allFields(srcClz);
-		final List<Field> destFields = allFields(dest.getClass());
-		for (final Field field : fields) {
-			if (!Modifier.isStatic(field.getModifiers())) {
-				try {
-					final Object fieldObject = field.get(src);
-					field.setAccessible(true);
-					if (destFields.contains(field)) {
-						field.set(dest, fieldObject);
-					}
-				} catch (final IllegalArgumentException e) {
-					throw new RuntimeException(e);
-				} catch (final IllegalAccessException e) {
-					throw new RuntimeException(e);
-				}
-			}
-		}
-	}
-
-	/**
-	 * reflection utils
-	 */
-	private void addAll(final List<Field> l, final Field[] fields) {
-		for (final Field field : fields) {
-			if (!field.isAccessible()) {
-				field.setAccessible(true);
-			}
-			l.add(field);
-		}
-	}
-
-	/**
-	 * reflection utils, override this to choose which fields to clone
-	 */
-	protected List<Field> allFields(final Class<?> c) {
-		List<Field> l = fieldsCache.get(c);
-		if (l == null) {
-			l = new LinkedList<>();
-			final Field[] fields = c.getDeclaredFields();
-			addAll(l, fields);
-			Class<?> sc = c;
-			while ((sc = sc.getSuperclass()) != Object.class && sc != null) {
-				addAll(l, sc.getDeclaredFields());
-			}
-			fieldsCache.putIfAbsent(c, l);
-		}
-		return l;
 	}
 
 	/**
