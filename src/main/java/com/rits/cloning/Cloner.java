@@ -310,10 +310,6 @@ public class Cloner {
 			if (iClz.isAssignableFrom(clz)) return o;
 		}
 		if (isImmutable(clz)) return o;
-		if (o instanceof IFreezable) {
-			final IFreezable f = (IFreezable) o;
-			if (f.isFrozen()) return o;
-		}
 		final Object clonedPreviously = clones != null ? clones.get(o) : null;
 		if (clonedPreviously != null) return (T) clonedPreviously;
 

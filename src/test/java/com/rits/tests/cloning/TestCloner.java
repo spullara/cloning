@@ -3,10 +3,8 @@ package com.rits.tests.cloning;
 import com.rits.cloning.Cloner;
 import com.rits.cloning.FastClonerHashMap;
 import com.rits.cloning.Immutable;
-import com.rits.tests.cloning.TestCloner.SynthOuter.Inner;
 import com.rits.tests.cloning.domain.A;
 import com.rits.tests.cloning.domain.B;
-import com.rits.tests.cloning.domain.F;
 import com.rits.tests.cloning.domain.G;
 import junit.framework.TestCase;
 import org.junit.Assert;
@@ -543,13 +541,6 @@ public class TestCloner extends TestCase {
 		assertEquals("kostas", b.getName());
 		assertEquals(5, b.getX());
 		assertEquals(10, b.getY());
-	}
-
-	public void testFreezable() {
-		final F f = new F();
-		assertNotSame(f, cloner.deepClone(f));
-		f.setFrozen(true);
-		assertSame(f, cloner.deepClone(f));
 	}
 
 	public void testDeepCloneDontCloneInstances() {
