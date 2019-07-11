@@ -1,6 +1,7 @@
 package com.rits.cloning;
 
 import sun.misc.Unsafe;
+import sun.reflect.ReflectionFactory;
 
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Array;
@@ -10,6 +11,7 @@ import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.net.URI;
 import java.net.URL;
+import java.sql.Ref;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -196,7 +198,7 @@ public class Cloner {
 		fastCloners.remove(c);
 	}
 
-	private static Unsafe unsafe = Unsafe.getUnsafe();
+	private static ReflectionFactory reflectionFactory = ReflectionFactory.getReflectionFactory();
 
 	/**
 	 * creates a new instance of c. Override to provide your own implementation
@@ -207,8 +209,8 @@ public class Cloner {
 	 */
 	protected <T> T newInstance(final Class<T> c) {
 		try {
-			return c.cast(unsafe.allocateInstance(c));
-		} catch (InstantiationException e) {
+			return c.cast(reflectionFactory.newConstructorForSerialization(c).newInstance(null));
+		} catch (Exception e) {
 			throw new AssertionError("Failed to instantiate: " + c, e);
 		}
 	}
