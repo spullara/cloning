@@ -25,7 +25,6 @@ public class Cloner {
 	private final Set<Class<?>> ignored = new HashSet<>();
 	private final Set<Class<?>> ignoredInstanceOf = new HashSet<>();
 	private final Map<Class<?>, IFastCloner> fastCloners = new HashMap<>();
-	private final List<ICloningStrategy> cloningStrategies = new LinkedList<>();
 
     public Cloner() {
 		init();
@@ -98,11 +97,6 @@ public class Cloner {
 		registerImmutable(URL.class);
 		registerImmutable(UUID.class);
 		registerImmutable(Pattern.class);
-	}
-
-	public void registerCloningStrategy(ICloningStrategy strategy) {
-		if (strategy == null) throw new NullPointerException("strategy can't be null");
-		cloningStrategies.add(strategy);
 	}
 
 	/**
@@ -339,7 +333,7 @@ public class Cloner {
 
 		CloneObjectCloner(Class<?> clz) {
 			constructor = reflectionFactory.newConstructorForSerialization(clz, objectConstructor);
-			List<Field> l = new LinkedList<>();
+			List<Field> l = new ArrayList<>();
 			Class<?> sc = clz;
 			do {
 				final Field[] fs = sc.getDeclaredFields();
@@ -366,8 +360,8 @@ public class Cloner {
 				}
 				for (int i = 0; i < numFields; i++) {
 					Field field = fields[i];
-					final Object fieldObject = field.get(o);
-					final Object fieldObjectClone = clones != null ? applyCloningStrategy(clones, o, fieldObject, field) : fieldObject;
+					Object fieldObject = field.get(o);
+					Object fieldObjectClone = clones != null ? cloneInternal(fieldObject, clones) : fieldObject;
 					field.set(newInstance, fieldObjectClone);
 				}
 				return newInstance;
@@ -375,15 +369,6 @@ public class Cloner {
 				throw new AssertionError(e);
 			}
 		}
-	}
-
-	private Object applyCloningStrategy(Map<Object, Object> clones, Object o, Object fieldObject, Field field) {
-		for (ICloningStrategy strategy : cloningStrategies) {
-			ICloningStrategy.Strategy s = strategy.strategyFor(o, field);
-			if (s == ICloningStrategy.Strategy.NULL_INSTEAD_OF_CLONE) return null;
-			if (s == ICloningStrategy.Strategy.SAME_INSTANCE_INSTEAD_OF_CLONE) return fieldObject;
-		}
-		return cloneInternal(fieldObject, clones);
 	}
 
 	@SuppressWarnings("unchecked")
@@ -404,10 +389,6 @@ public class Cloner {
 			}
 		}
 		return newInstance;
-	}
-
-	private boolean isAnonymousParent(final Field field) {
-		return "this$0".equals(field.getName());
 	}
 
 	/**
