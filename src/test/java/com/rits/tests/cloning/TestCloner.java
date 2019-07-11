@@ -512,35 +512,6 @@ public class TestCloner extends TestCase {
 		assertEquals(4, cloned.size());
 	}
 
-	public void testDeepCloneDontCloneInstances() {
-		final A a = new A();
-		final B b = new B();
-		final G g = new G(a, b);
-		final G cga = cloner.deepCloneDontCloneInstances(g, a);
-		assertNotSame(g, cga);
-		assertNotSame(cga.getB(), b);
-		assertSame(cga.getA(), a);
-
-		final G cgab = cloner.deepCloneDontCloneInstances(g, a, b);
-		assertNotSame(g, cgab);
-		assertSame(cgab.getB(), b);
-		assertSame(cgab.getA(), a);
-	}
-
-	static class SynthOuter {
-		public Inner getInner() {
-			return new Inner();
-		}
-
-		class Inner {
-			Object x = new Object();
-
-			public SynthOuter getOuter() {
-				return SynthOuter.this;
-			}
-		}
-	}
-
 	public void testTreeMapWithComparator() {
 		final TreeMap<Object, String> m = new TreeMap<Object, String>(new Comparator<Object>() {
 			public int compare(final Object o1, final Object o2) {
@@ -592,12 +563,6 @@ public class TestCloner extends TestCase {
 		final TestEnum original = TestEnum.A;
 		final TestEnum clone = cloner.deepClone(original);
 		assertSame(clone, original);
-	}
-
-	public void testUnregisterFastCloner() {
-		Cloner cloner = new Cloner();
-		cloner.unregisterFastCloner(HashMap.class);
-		cloner.registerFastCloner(HashMap.class, new FastClonerHashMap());
 	}
 
 	public void testEmptyLinkedHashMap() {

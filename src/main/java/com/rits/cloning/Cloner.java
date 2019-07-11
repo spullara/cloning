@@ -69,12 +69,6 @@ public class Cloner {
 		}
 	}
 
-	private IDeepCloner deepCloner = new IDeepCloner() {
-		public <T> T deepClone(T o, Map<Object, Object> clones) {
-			return cloneInternal(o, clones);
-		}
-	};
-
 	/**
 	 * registers some known JDK immutable classes. Override this to register your
 	 * own list of jdk's immutable classes
@@ -134,29 +128,9 @@ public class Cloner {
 		}
 	}
 
-	// spring framework friendly version of registerImmutable
-	public void setExtraImmutables(final Set<Class<?>> set) {
-		ignored.addAll(set);
-	}
-
 	public void registerFastCloner(final Class<?> c, final IFastCloner fastCloner) {
 		if (fastCloners.containsKey(c)) throw new IllegalArgumentException(c + " already fast-cloned!");
 		fastCloners.put(c, fastCloner);
-	}
-
-	public void unregisterFastCloner(final Class<?> c) {
-		fastCloners.remove(c);
-	}
-
-	private static ReflectionFactory reflectionFactory = ReflectionFactory.getReflectionFactory();
-	private static Constructor objectConstructor;
-
-	static {
-		try {
-			objectConstructor = Object.class.getConstructor((Class[]) null);
-		} catch (NoSuchMethodException e) {
-			throw new AssertionError(e);
-		}
 	}
 
 	/**
@@ -168,16 +142,7 @@ public class Cloner {
 	 */
 	public <T> T deepClone(final T o) {
 		if (o == null) return null;
-		final Map<Object, Object> clones = new IdentityHashMap<>(16);
-		return cloneInternal(o, clones);
-	}
-
-	public <T> T deepCloneDontCloneInstances(final T o, final Object... dontCloneThese) {
-		if (o == null) return null;
-		final Map<Object, Object> clones = new IdentityHashMap<>(16);
-		for (final Object dc : dontCloneThese) {
-			clones.put(dc, dc);
-		}
+		Map<Object, Object> clones = new IdentityHashMap<>();
 		return cloneInternal(o, clones);
 	}
 
@@ -260,8 +225,14 @@ public class Cloner {
 				return clone;
 			}
 		}
+		if (o instanceof Enum) return o;
 
-		IDeepCloner cloner = cloners.computeIfAbsent(o.getClass(), this::findDeepCloner);
+		Class<?> aClass = o.getClass();
+		IDeepCloner cloner = cloners.get(aClass);
+		if (cloner == null) {
+			cloner = findDeepCloner(aClass);
+			cloners.put(aClass, cloner);
+		}
 		if (cloner == IGNORE_CLONER) {
 			return o;
 		}
@@ -269,14 +240,12 @@ public class Cloner {
 	}
 
 	private IDeepCloner findDeepCloner(Class<?> clz) {
-		if (clz.isAssignableFrom(Enum.class)) {
-			return IGNORE_CLONER;
-		} else if (ignored.contains(clz)) {
+		if (ignored.contains(clz)) {
 			return IGNORE_CLONER;
 		} else if (isImmutable(clz)) {
 			return IGNORE_CLONER;
 		} else if (clz.isArray()) {
-			return new CloneArrayCloner();
+			return new CloneArrayCloner(clz);
 		} else {
 			final IFastCloner fastCloner = fastCloners.get(clz);
 			if (fastCloner != null) {
@@ -293,9 +262,38 @@ public class Cloner {
 	}
 
 	private class CloneArrayCloner implements IDeepCloner {
+
+		private boolean primitive;
+		private boolean immutable;
+		private Class<?> componentType;
+
+		public CloneArrayCloner(Class<?> clz) {
+			primitive = clz.getComponentType().isPrimitive();
+			immutable = isImmutable(clz.getComponentType());
+			componentType = clz.getComponentType();
+		}
+
 		@Override
 		public <T> T deepClone(T o, Map<Object, Object> clones) {
-			return cloneArray(o, clones);
+			int length = Array.getLength(o);
+			T newInstance = (T) Array.newInstance(componentType, length);
+			if (clones != null) {
+				clones.put(o, newInstance);
+			}
+			if (primitive || immutable) {
+				System.arraycopy(o, 0, newInstance, 0, length);
+			} else {
+				if (clones == null) {
+					for (int i = 0; i < length; i++) {
+						Array.set(newInstance, i, Array.get(o, i));
+					}
+				} else {
+					for (int i = 0; i < length; i++) {
+						Array.set(newInstance, i, cloneInternal(Array.get(o, i), clones));
+					}
+				}
+			}
+			return newInstance;
 		}
 	}
 
@@ -308,7 +306,7 @@ public class Cloner {
 
 		@Override
 		public <T> T deepClone(T o, Map<Object, Object> clones) {
-			T clone = (T) fastCloner.clone(o, deepCloner, clones);
+			T clone = (T) fastCloner.clone(o, Cloner.this::cloneInternal, clones);
 			if (clones != null) clones.put(o, clone);
 			return clone;
 		}
@@ -324,6 +322,16 @@ public class Cloner {
 	}
 
 	private static final Field[] EMPTY_FIELD_ARRAY = new Field[0];
+	private static final ReflectionFactory REFLECTION_FACTORY = ReflectionFactory.getReflectionFactory();
+	private static final Constructor OBJECT_CONSTRUCTOR;
+
+	static {
+		try {
+			OBJECT_CONSTRUCTOR = Object.class.getConstructor((Class[]) null);
+		} catch (NoSuchMethodException e) {
+			throw new AssertionError(e);
+		}
+	}
 
 	private class CloneObjectCloner implements IDeepCloner {
 
@@ -332,7 +340,7 @@ public class Cloner {
 		private final int numFields;
 
 		CloneObjectCloner(Class<?> clz) {
-			constructor = reflectionFactory.newConstructorForSerialization(clz, objectConstructor);
+			constructor = REFLECTION_FACTORY.newConstructorForSerialization(clz, OBJECT_CONSTRUCTOR);
 			List<Field> l = new ArrayList<>();
 			Class<?> sc = clz;
 			do {
@@ -373,26 +381,6 @@ public class Cloner {
 				throw new AssertionError(e);
 			}
 		}
-	}
-
-	@SuppressWarnings("unchecked")
-	private <T> T cloneArray(T o, Map<Object, Object> clones) {
-		final Class<T> clz = (Class<T>) o.getClass();
-		final int length = Array.getLength(o);
-		final T newInstance = (T) Array.newInstance(clz.getComponentType(), length);
-		if (clones != null) {
-			clones.put(o, newInstance);
-		}
-		if (clz.getComponentType().isPrimitive() || isImmutable(clz.getComponentType())) {
-			System.arraycopy(o, 0, newInstance, 0, length);
-		} else {
-			for (int i = 0; i < length; i++) {
-				final Object v = Array.get(o, i);
-				final Object clone = clones != null ? cloneInternal(v, clones) : v;
-				Array.set(newInstance, i, clone);
-			}
-		}
-		return newInstance;
 	}
 
 	/**
