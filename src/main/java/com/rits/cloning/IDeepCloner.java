@@ -11,9 +11,10 @@ public interface IDeepCloner {
     /**
      * deep clones o
      *
-     * @param o      the object to be deep cloned
      * @param <T>    the type of o
+     * @param o      the object to be deep cloned
+     * @param clones
      * @return a clone of o
      */
-    <T> T deepClone(final T o);
+    <T> T deepClone(final T o, Map<Object, Object> clones);
 }

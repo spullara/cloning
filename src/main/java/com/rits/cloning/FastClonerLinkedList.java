@@ -11,12 +11,12 @@ import java.util.Map;
 public class FastClonerLinkedList implements IFastCloner
 {
 	@SuppressWarnings({ "unchecked", "rawtypes" })
-    public Object clone(final Object t, final IDeepCloner cloner) {
+    public Object clone(final Object t, final IDeepCloner cloner, Map<Object, Object> clones) {
 		final LinkedList al = (LinkedList) t;
 		final LinkedList l = new LinkedList();
 		for (final Object o : al)
 		{
-            final Object cloneInternal = cloner.deepClone(o);
+            final Object cloneInternal = cloner.deepClone(o, clones);
             l.add(cloneInternal);
 		}
 		return l;

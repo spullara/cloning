@@ -12,7 +12,7 @@ import java.util.TimeZone;
  */
 public class FastClonerCalendar implements IFastCloner
 {
-    public Object clone(final Object t, final IDeepCloner cloner) {
+    public Object clone(final Object t, final IDeepCloner cloner, Map<Object, Object> clones) {
 		final GregorianCalendar gc = new GregorianCalendar();
 		Calendar c = (Calendar) t;
 		gc.setTimeInMillis(c.getTimeInMillis());

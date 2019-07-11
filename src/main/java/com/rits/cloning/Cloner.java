@@ -88,13 +88,8 @@ public class Cloner {
     }
 
     private IDeepCloner deepCloner = new IDeepCloner() {
-        public <T> T deepClone(T o) {
-            try {
-                return cloneInternal(o);
-            } catch (IllegalAccessException e) {
-                // just rethrow unchecked
-                throw new IllegalStateException(e);
-            }
+        public <T> T deepClone(T o, Map<Object, Object> clones) {
+            return cloneInternal(o, clones);
         }
     };
 
@@ -197,12 +192,19 @@ public class Cloner {
     public <T> T deepClone(final T o) {
         if (o == null) return null;
         if (!cloningEnabled) return o;
-        try {
-            return cloneInternal(o);
-        } catch (final IllegalAccessException e) {
-            throw new CloningException("error during cloning of " + o, e);
+        if (cyclic.get(o.getClass()) == null) {
+            try {
+                return cloneInternal(o, null);
+            } catch (StackOverflowError soe) {
+                cyclic.put(o.getClass(), true);
+                return deepClone(o);
+            }
+        } else {
+            return cloneInternal(o, new IdentityHashMap<>());
         }
     }
+
+    private Map<Class, Boolean> cyclic = new ConcurrentHashMap<>();
 
     /**
      * shallow clones "o". This means that if c=shallowClone(o) then
@@ -215,11 +217,7 @@ public class Cloner {
     public <T> T shallowClone(final T o) {
         if (o == null) return null;
         if (!cloningEnabled) return o;
-        try {
-            return cloneInternal(o);
-        } catch (final IllegalAccessException e) {
-            throw new CloningException("error during cloning of " + o, e);
-        }
+        return cloneInternal(o, null);
     }
 
     // caches immutables for quick reference
@@ -274,13 +272,21 @@ public class Cloner {
         return false;
     }
 
-    private Map<Class, Boolean> skip = new ConcurrentHashMap<>();
     private Map<Class, IDeepCloner> cloners = new ConcurrentHashMap<>();
 
     @SuppressWarnings("unchecked")
-    protected <T> T cloneInternal(final T o) throws IllegalAccessException {
+    protected <T> T cloneInternal(final T o, Map<Object, Object> clones) {
         if (o == null) return null;
-        if (o == this) return null; // don't clone the cloner!
+        if (o == this) return null;
+
+        // Prevent cycles, expensive but necessary
+        if (clones != null) {
+            T clone = (T) clones.get(o);
+            if (clone != null) {
+                return clone;
+            }
+        }
+
         final Class<T> clz = (Class<T>) o.getClass();
         IDeepCloner cloner = cloners.get(clz);
         if (cloner == null) {
@@ -310,17 +316,13 @@ public class Cloner {
         if (cloner == IGNORE_CLONER) {
             return o;
         }
-        return cloner.deepClone(o);
+        return cloner.deepClone(o, clones);
     }
 
     private class CloneArrayCloner implements IDeepCloner {
         @Override
-        public <T> T deepClone(T o) {
-            try {
-                return cloneArray(o);
-            } catch (IllegalAccessException e) {
-                throw new AssertionError(e);
-            }
+        public <T> T deepClone(T o, Map<Object, Object> clones) {
+            return cloneArray(o, clones);
         }
     }
 
@@ -332,29 +334,35 @@ public class Cloner {
         }
 
         @Override
-        public <T> T deepClone(T o) {
-            return (T) fastCloner.clone(o, deepCloner);
+        public <T> T deepClone(T o, Map<Object, Object> clones) {
+            return (T) fastCloner.clone(o, deepCloner, clones);
         }
     }
 
     private static class IgnoreClassCloner implements IDeepCloner {
         @Override
-        public <T> T deepClone(T o) {
+        public <T> T deepClone(T o, Map<Object, Object> clones) {
             throw new AssertionError("Don't call this directly");
         }
     }
 
     private class CloneObjectCloner implements IDeepCloner {
         private final Class<?> clz;
+        private boolean cyclic = false;
 
         CloneObjectCloner(Class<?> clz) {
             this.clz = clz;
         }
 
         @Override
-        public <T> T deepClone(T o) {
+        public <T> T deepClone(T o, Map<Object, Object> clones) {
             try {
-                return cloneObject(o, (Class<T>) clz);
+                try {
+                    return cloneObject(o, (Class<T>) clz, clones);
+                } catch (StackOverflowError soe) {
+                    cyclic = true;
+                    throw soe;
+                }
             } catch (IllegalAccessException e) {
                 throw new AssertionError(e);
             }
@@ -367,14 +375,15 @@ public class Cloner {
     }
 
     // clones o, no questions asked!
-    private <T> T cloneObject(T o, Class<T> clz) throws IllegalAccessException {
+    private <T> T cloneObject(T o, Class<T> clz, Map<Object, Object> clones) throws IllegalAccessException {
         final T newInstance = newInstance(clz);
+        if (clones != null) clones.put(o, newInstance);
         final Field[] fields = allFields(clz);
         for (int i = 0; i < fields.length; i++) {
             Field field = fields[i];
             final Object fieldObject = field.get(o);
             final boolean shouldClone = !field.isSynthetic() && !isAnonymousParent(field);
-            final Object fieldObjectClone = shouldClone ? cloneInternal(fieldObject) : fieldObject;
+            final Object fieldObjectClone = shouldClone ? cloneInternal(fieldObject, clones) : fieldObject;
             field.set(newInstance, fieldObjectClone);
         }
         return newInstance;
@@ -385,7 +394,7 @@ public class Cloner {
     }
 
     @SuppressWarnings("unchecked")
-    private <T> T cloneArray(T o) throws IllegalAccessException {
+    private <T> T cloneArray(T o, Map<Object, Object> clones) {
         final Class<T> clz = (Class<T>) o.getClass();
         final int length = Array.getLength(o);
         final T newInstance = (T) Array.newInstance(clz.getComponentType(), length);
@@ -394,7 +403,7 @@ public class Cloner {
         } else {
             for (int i = 0; i < length; i++) {
                 final Object v = Array.get(o, i);
-                final Object clone = cloneInternal(v);
+                final Object clone = cloneInternal(v, clones);
                 Array.set(newInstance, i, clone);
             }
         }

@@ -2,6 +2,7 @@ package com.rits.cloning;
 
 import java.lang.reflect.Field;
 import java.util.Comparator;
+import java.util.Map;
 import java.util.TreeMap;
 import java.util.TreeSet;
 
@@ -22,7 +23,7 @@ public class FastClonerTreeSet implements IFastCloner {
     }
 
     @Override
-    public Object clone(Object t, IDeepCloner cloner) {
+    public Object clone(Object t, IDeepCloner cloner, Map<Object, Object> clones) {
         TreeSet treeSet = (TreeSet) t;
         TreeSet result = null;
         try {
@@ -31,7 +32,7 @@ public class FastClonerTreeSet implements IFastCloner {
             throw new AssertionError(e);
         }
         for (Object o : treeSet) {
-            result.add(cloner.deepClone(o));
+            result.add(cloner.deepClone(o, clones));
         }
         return result;
     }
