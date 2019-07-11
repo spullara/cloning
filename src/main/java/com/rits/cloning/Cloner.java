@@ -5,6 +5,7 @@ import sun.reflect.ReflectionFactory;
 
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Array;
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.math.BigDecimal;
@@ -37,19 +38,6 @@ public class Cloner {
 		init();
 	}
 
-	/**
-	 * this makes the cloner to set a transient field to null upon cloning.
-	 *
-	 * NOTE: primitive types can't be nulled. Their value will be set to default, i.e. 0 for int
-	 *
-	 * @param nullTransient true for transient fields to be nulled
-	 */
-	public void setNullTransient(final boolean nullTransient) {
-    }
-
-	public void setCloneSynthetics(final boolean cloneSynthetics) {
-    }
-
 	private void init() {
 		registerKnownJdkImmutableClasses();
 		registerFastCloners();
@@ -65,12 +53,14 @@ public class Cloner {
 		fastCloners.put(HashSet.class, new FastClonerHashSet());
 		fastCloners.put(HashMap.class, new FastClonerHashMap());
 		fastCloners.put(TreeMap.class, new FastClonerTreeMap());
+		fastCloners.put(TreeSet.class, new FastClonerTreeSet());
 		fastCloners.put(LinkedHashMap.class, new FastClonerLinkedHashMap());
 		fastCloners.put(ConcurrentHashMap.class, new FastClonerConcurrentHashMap());
 		fastCloners.put(ConcurrentLinkedQueue.class, new FastClonerConcurrentLinkedQueue());
 
 		// register private classes
 		FastClonerArrayListSubList subListCloner = new FastClonerArrayListSubList();
+		registerInaccessibleClassToBeFastCloned("java.util.AbstractList$SubList", subListCloner);
 		registerInaccessibleClassToBeFastCloned("java.util.ArrayList$SubList", subListCloner);
 		registerInaccessibleClassToBeFastCloned("java.util.SubList", subListCloner);
 		registerInaccessibleClassToBeFastCloned("java.util.RandomAccessSubList", subListCloner);
@@ -199,6 +189,15 @@ public class Cloner {
 	}
 
 	private static ReflectionFactory reflectionFactory = ReflectionFactory.getReflectionFactory();
+	private static Constructor objectConstrutor;
+
+	static {
+		try {
+			objectConstrutor = Object.class.getConstructor((Class[]) null);
+		} catch (NoSuchMethodException e) {
+			throw new AssertionError(e);
+		}
+	}
 
 	/**
 	 * creates a new instance of c. Override to provide your own implementation
@@ -209,7 +208,7 @@ public class Cloner {
 	 */
 	protected <T> T newInstance(final Class<T> c) {
 		try {
-			return c.cast(reflectionFactory.newConstructorForSerialization(c).newInstance(null));
+			return c.cast(reflectionFactory.newConstructorForSerialization(c, objectConstrutor).newInstance(null));
 		} catch (Exception e) {
 			throw new AssertionError("Failed to instantiate: " + c, e);
 		}
