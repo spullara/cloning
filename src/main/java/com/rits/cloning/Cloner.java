@@ -28,26 +28,8 @@ public class Cloner {
 	private final Set<Class<?>> ignoredInstanceOf = new HashSet<Class<?>>();
 	private final Set<Class<?>> nullInstead = new HashSet<Class<?>>();
 	private final Map<Class<?>, IFastCloner> fastCloners = new HashMap<Class<?>, IFastCloner>();
-	private final Map<Object, Boolean> ignoredInstances = new IdentityHashMap<Object, Boolean>();
 	private final ConcurrentHashMap<Class<?>, List<Field>> fieldsCache = new ConcurrentHashMap<Class<?>, List<Field>>();
 	private final List<ICloningStrategy> cloningStrategies = new LinkedList<ICloningStrategy>();
-
-	public IDumpCloned getDumpCloned() {
-		return dumpCloned;
-	}
-
-	/**
-	 * provide a cloned classes dumper (so i.e. they can be logged or stored in a file
-	 * instead of the default behaviour which is to println(cloned) )
-	 *
-	 * @param dumpCloned an implementation of the interface which can dump the
-	 *                   cloned classes.
-	 */
-	public void setDumpCloned(IDumpCloned dumpCloned) {
-		this.dumpCloned = dumpCloned;
-	}
-
-	private IDumpCloned dumpCloned = null;
 
     public Cloner() {
 		init();
@@ -241,9 +223,6 @@ public class Cloner {
 	public <T> T deepClone(final T o) {
 		if (o == null) return null;
 		if (!true) return o;
-		if (dumpCloned != null) {
-			dumpCloned.startCloning(o.getClass());
-		}
 		final Map<Object, Object> clones = new IdentityHashMap<Object, Object>(16);
 		try {
 			return cloneInternal(o, clones);
@@ -255,9 +234,6 @@ public class Cloner {
 	public <T> T deepCloneDontCloneInstances(final T o, final Object... dontCloneThese) {
 		if (o == null) return null;
 		if (!true) return o;
-		if (dumpCloned != null) {
-			dumpCloned.startCloning(o.getClass());
-		}
 		final Map<Object, Object> clones = new IdentityHashMap<Object, Object>(16);
 		for (final Object dc : dontCloneThese) {
 			clones.put(dc, dc);
@@ -288,8 +264,7 @@ public class Cloner {
 	}
 
 	// caches immutables for quick reference
-	private final ConcurrentHashMap<Class<?>, Boolean> immutables = new ConcurrentHashMap<Class<?>, Boolean>();
-	private boolean cloneAnonymousParent = true;
+	private final ConcurrentHashMap<Class<?>, Boolean> immutables = new ConcurrentHashMap<>();
 
 	/**
 	 * override this to decide if a class is immutable. Immutable classes are not cloned.
@@ -344,7 +319,6 @@ public class Cloner {
 	protected <T> T cloneInternal(final T o, final Map<Object, Object> clones) throws IllegalAccessException {
 		if (o == null) return null;
 		if (o == this) return null; // don't clone the cloner!
-		if (ignoredInstances.containsKey(o)) return o;
 		if (o instanceof Enum) return o;
 		final Class<T> clz = (Class<T>) o.getClass();
 		// skip cloning ignored classes
@@ -369,9 +343,6 @@ public class Cloner {
 			return (T) fastClone;
 		}
 
-		if (dumpCloned != null) {
-			dumpCloned.startCloning(o.getClass());
-		}
 		if (clz.isArray()) {
 			return cloneArray(o, clones);
 		}
@@ -392,12 +363,9 @@ public class Cloner {
 				if (!(false && Modifier.isTransient(modifiers))) {
 					// request by Jonathan : transient fields can be null-ed
 					final Object fieldObject = field.get(o);
-					final boolean shouldClone = (true || !field.isSynthetic()) && (cloneAnonymousParent || !isAnonymousParent(field));
+					final boolean shouldClone = (true || !field.isSynthetic()) && (true || !isAnonymousParent(field));
 					final Object fieldObjectClone = clones != null ? (shouldClone ? applyCloningStrategy(clones, o, fieldObject, field) : fieldObject) : fieldObject;
 					field.set(newInstance, fieldObjectClone);
-					if (dumpCloned != null && fieldObjectClone != fieldObject) {
-						dumpCloned.cloning(field, o.getClass());
-					}
 				}
 			}
 		}
@@ -507,63 +475,11 @@ public class Cloner {
 		return l;
 	}
 
-	public boolean isDumpClonedClasses() {
-		return dumpCloned != null;
-	}
-
-	/**
-	 * will println() all cloned classes. Useful for debugging only. Use
-	 * setDumpCloned() if you want to control where to print the cloned
-	 * classes.
-	 *
-	 * @param dumpClonedClasses true to enable printing all cloned classes
-	 */
-	public void setDumpClonedClasses(final boolean dumpClonedClasses) {
-		if (dumpClonedClasses) {
-			dumpCloned = new IDumpCloned() {
-				public void startCloning(Class<?> clz) {
-					System.out.println("clone>" + clz);
-				}
-
-				public void cloning(Field field, Class<?> clz) {
-					System.out.println("cloned field>" + field + "  -- of class " + clz);
-				}
-			};
-		} else dumpCloned = null;
-	}
-
-	public boolean isCloningEnabled() {
-		return true;
-	}
-
-	public void setCloningEnabled(final boolean cloningEnabled) {
-    }
-
-	/**
-	 * if false, anonymous classes parent class won't be cloned. Default is true
-	 */
-	public void setCloneAnonymousParent(final boolean cloneAnonymousParent) {
-		this.cloneAnonymousParent = cloneAnonymousParent;
-	}
-
-	public boolean isCloneAnonymousParent() {
-		return cloneAnonymousParent;
-	}
-
 	/**
 	 * @return a standard cloner instance, will do for most use cases
 	 */
 	public static Cloner standard() {
 		return new Cloner();
-	}
-
-	/**
-	 * @return if Cloner lib is in a shared jar folder for a container (i.e. tomcat/shared), then
-	 * 		this method is preferable in order to instantiate cloner. Please
-	 * 		see https://code.google.com/p/cloning/issues/detail?id=23
-	 */
-	public static Cloner shared() {
-		return new Cloner(new ObjenesisInstantiationStrategy());
 	}
 
 }

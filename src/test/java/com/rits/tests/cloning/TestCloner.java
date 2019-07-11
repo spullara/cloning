@@ -27,10 +27,6 @@ import static java.lang.annotation.RetentionPolicy.RUNTIME;
 public class TestCloner extends TestCase {
 	private final Cloner cloner = new Cloner();
 
-	{
-		cloner.setDumpClonedClasses(false);
-	}
-
 	@Target(TYPE)
 	@Retention(RUNTIME)
 	private @interface MyImmutable {
