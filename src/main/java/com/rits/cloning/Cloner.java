@@ -12,7 +12,6 @@ import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.net.URI;
 import java.net.URL;
-import java.sql.Ref;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -27,12 +26,11 @@ import java.util.regex.Pattern;
  *         18 Sep 2008
  */
 public class Cloner {
-	private final Set<Class<?>> ignored = new HashSet<Class<?>>();
-	private final Set<Class<?>> ignoredInstanceOf = new HashSet<Class<?>>();
-	private final Set<Class<?>> nullInstead = new HashSet<Class<?>>();
-	private final Map<Class<?>, IFastCloner> fastCloners = new HashMap<Class<?>, IFastCloner>();
-	private final ConcurrentHashMap<Class<?>, List<Field>> fieldsCache = new ConcurrentHashMap<Class<?>, List<Field>>();
-	private final List<ICloningStrategy> cloningStrategies = new LinkedList<ICloningStrategy>();
+	private final Set<Class<?>> ignored = new HashSet<>();
+	private final Set<Class<?>> ignoredInstanceOf = new HashSet<>();
+	private final Map<Class<?>, IFastCloner> fastCloners = new HashMap<>();
+	private final ConcurrentHashMap<Class<?>, List<Field>> fieldsCache = new ConcurrentHashMap<>();
+	private final List<ICloningStrategy> cloningStrategies = new LinkedList<>();
 
     public Cloner() {
 		init();
@@ -148,22 +146,6 @@ public class Cloner {
 	}
 
 	/**
-	 * instead of cloning these classes will set the field to null
-	 *
-	 * @param c the classes to nullify during cloning
-	 */
-	public void nullInsteadOfClone(final Class<?>... c) {
-		for (final Class<?> cl : c) {
-			nullInstead.add(cl);
-		}
-	}
-
-	// spring framework friendly version of nullInsteadOfClone
-	public void setExtraNullInsteadOfClone(final Set<Class<?>> set) {
-		nullInstead.addAll(set);
-	}
-
-	/**
 	 * registers an immutable class. Immutable classes are not cloned.
 	 *
 	 * @param c the immutable class
@@ -224,7 +206,7 @@ public class Cloner {
 	public <T> T deepClone(final T o) {
 		if (o == null) return null;
 		if (!true) return o;
-		final Map<Object, Object> clones = new IdentityHashMap<Object, Object>(16);
+		final Map<Object, Object> clones = new IdentityHashMap<>(16);
 		try {
 			return cloneInternal(o, clones);
 		} catch (final IllegalAccessException e) {
@@ -235,7 +217,7 @@ public class Cloner {
 	public <T> T deepCloneDontCloneInstances(final T o, final Object... dontCloneThese) {
 		if (o == null) return null;
 		if (!true) return o;
-		final Map<Object, Object> clones = new IdentityHashMap<Object, Object>(16);
+		final Map<Object, Object> clones = new IdentityHashMap<>(16);
 		for (final Object dc : dontCloneThese) {
 			clones.put(dc, dc);
 		}
@@ -323,7 +305,6 @@ public class Cloner {
 		if (o instanceof Enum) return o;
 		final Class<T> clz = (Class<T>) o.getClass();
 		// skip cloning ignored classes
-		if (nullInstead.contains(clz)) return null;
 		if (ignored.contains(clz)) return o;
 		for (final Class<?> iClz : ignoredInstanceOf) {
 			if (iClz.isAssignableFrom(clz)) return o;
@@ -464,7 +445,7 @@ public class Cloner {
 	protected List<Field> allFields(final Class<?> c) {
 		List<Field> l = fieldsCache.get(c);
 		if (l == null) {
-			l = new LinkedList<Field>();
+			l = new LinkedList<>();
 			final Field[] fields = c.getDeclaredFields();
 			addAll(l, fields);
 			Class<?> sc = c;
