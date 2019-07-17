@@ -3,6 +3,8 @@ package com.rits.cloning;
 import sun.reflect.ReflectionFactory;
 
 import java.lang.annotation.Annotation;
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
 import java.lang.reflect.*;
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -258,7 +260,7 @@ public class Cloner {
 				}
 			}
 		}
-		return new CloneObjectCloner(clz);
+		return new MethodHandleObjectCloner(clz);
 	}
 
 	private class CloneArrayCloner implements IDeepCloner {
@@ -333,57 +335,67 @@ public class Cloner {
 		}
 	}
 
-	private class CloneObjectCloner implements IDeepCloner {
+	private class MethodHandleObjectCloner implements IDeepCloner {
 
-		private final Constructor constructor;
-		private final Field[] fields;
-		private final int numFields;
+        private final Constructor constructor;
+        private final MethodHandle[] getters;
+		private final MethodHandle[] setters;
+        private final int numFields;
 
-		CloneObjectCloner(Class<?> clz) {
-			constructor = REFLECTION_FACTORY.newConstructorForSerialization(clz, OBJECT_CONSTRUCTOR);
-			List<Field> l = new ArrayList<>();
-			Class<?> sc = clz;
-			do {
-				Field[] fs = sc.getDeclaredFields();
-				for (final Field f : fs) {
-					if (!f.isAccessible()) {
-						f.setAccessible(true);
-					}
-					int modifiers = f.getModifiers();
-					if (!Modifier.isStatic(modifiers)) {
-						l.add(f);
-					}
-				}
-			} while ((sc = sc.getSuperclass()) != Object.class && sc != null);
-			fields = l.toArray(EMPTY_FIELD_ARRAY);
-			numFields = fields.length;
-		}
-
-		@Override
-		public <T> T deepClone(T o, Map<Object, Object> clones) {
+        MethodHandleObjectCloner(Class<?> clz) {
+			MethodHandles.Lookup lookup = MethodHandles.lookup();
 			try {
-				T newInstance = (T) constructor.newInstance();
-				if (clones != null) {
-					clones.put(o, newInstance);
-					for (int i = 0; i < numFields; i++) {
-						Field field = fields[i];
-						field.set(newInstance, cloneInternal(field.get(o), clones));
+				constructor = REFLECTION_FACTORY.newConstructorForSerialization(clz, OBJECT_CONSTRUCTOR);
+				List<Field> l = new ArrayList<>();
+				Class<?> sc = clz;
+				do {
+					Field[] fs = sc.getDeclaredFields();
+					for (final Field f : fs) {
+						if (!f.isAccessible()) {
+							f.setAccessible(true);
+						}
+						int modifiers = f.getModifiers();
+						if (!Modifier.isStatic(modifiers)) {
+							l.add(f);
+						}
 					}
-				} else {
-					// Shallow clone
-					for (int i = 0; i < numFields; i++) {
-						Field field = fields[i];
-						field.set(newInstance, field.get(o));
-					}
+				} while ((sc = sc.getSuperclass()) != Object.class && sc != null);
+				numFields = l.size();
+				getters = new MethodHandle[numFields];
+				setters = new MethodHandle[numFields];
+				for (int i = 0; i < l.size(); i++) {
+					Field field = l.get(i);
+					getters[i] = lookup.unreflectGetter(field);
+					setters[i] = lookup.unreflectSetter(field);
 				}
-				return newInstance;
-			} catch (IllegalAccessException | InvocationTargetException | InstantiationException e) {
+			} catch (IllegalAccessException e) {
 				throw new AssertionError(e);
 			}
-		}
-	}
+        }
 
-	/**
+        @Override
+        public <T> T deepClone(T o, Map<Object, Object> clones) {
+            try {
+                T newInstance = (T) constructor.newInstance();
+                if (clones != null) {
+                    clones.put(o, newInstance);
+                    for (int i = 0; i < numFields; i++) {
+						setters[i].invoke((T) newInstance, cloneInternal(getters[i].invoke((T) o), clones));
+                    }
+                } else {
+                    // Shallow clone
+                    for (int i = 0; i < numFields; i++) {
+						setters[i].invoke((T) newInstance, getters[i].invoke((T) o));
+                    }
+                }
+                return newInstance;
+            } catch (Throwable e) {
+                throw new AssertionError(e);
+            }
+        }
+    }
+
+    /**
 	 * @return a standard cloner instance, will do for most use cases
 	 */
 	public static Cloner standard() {
